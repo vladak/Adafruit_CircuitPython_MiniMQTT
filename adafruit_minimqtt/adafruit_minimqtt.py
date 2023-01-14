@@ -142,7 +142,7 @@ class MQTT:
 
     """
 
-    # pylint: disable=too-many-arguments,too-many-instance-attributes, not-callable, invalid-name, no-member
+    # pylint: disable=too-many-arguments,too-many-instance-attributes,too-many-statements, not-callable, invalid-name, no-member
     def __init__(
         self,
         *,
@@ -183,6 +183,12 @@ class MQTT:
         self._pid = 0
         self._timestamp = 0
         self.logger = None
+
+        self._reconnect_timeout = 0
+        self._reconnect_attempt = 0
+        self._reconnect_time = None
+        self._reconnect_maximum_backoff = 32
+        self._reconnect_attempt_max = 8
 
         self.broker = broker
         self._username = username
@@ -268,39 +274,38 @@ class MQTT:
             host, port, 0, self._socket_pool.SOCK_STREAM
         )[0]
 
-        sock = None
-        retry_count = 0
+        try:
+            sock = self._socket_pool.socket(addr_info[0], addr_info[1])
+        except OSError:
+            # Do not consider this for back-off.
+            if self.logger is not None:
+                self.logger.warning(
+                    f"Failed to created socket for host {addr_info[0]} and port {addr_info[1]}"
+                )
+            return None
+
+        connect_host = addr_info[-1][0]
+        if port == MQTT_TLS_PORT:
+            sock = self._ssl_context.wrap_socket(sock, server_hostname=host)
+            connect_host = host
+        sock.settimeout(timeout)
+
         last_exception = None
-        while retry_count < self._connect_retries and sock is None:
-            retry_count += 1
+        try:
+            sock.connect((connect_host, port))
+        except MemoryError as exc:
+            sock.close()
+            sock = None
+            # Do not consider this for back-off.
+            if self.logger is not None:
+                self.logger.warning(f"Failed to allocate memory for connect: {exc}")
+        except OSError as exc:
+            sock.close()
+            sock = None
+            last_exception = exc
 
-            try:
-                sock = self._socket_pool.socket(addr_info[0], addr_info[1])
-            except OSError:
-                continue
-
-            connect_host = addr_info[-1][0]
-            if port == MQTT_TLS_PORT:
-                sock = self._ssl_context.wrap_socket(sock, server_hostname=host)
-                connect_host = host
-            sock.settimeout(timeout)
-
-            try:
-                sock.connect((connect_host, port))
-            except MemoryError as exc:
-                sock.close()
-                sock = None
-                last_exception = exc
-            except OSError as exc:
-                sock.close()
-                sock = None
-                last_exception = exc
-
-        if sock is None:
-            if last_exception:
-                raise RuntimeError("Repeated socket failures") from last_exception
-
-            raise RuntimeError("Repeated socket failures")
+        if last_exception:
+            raise last_exception
 
         self._backwards_compatible_sock = not hasattr(sock, "recv_into")
         return sock
@@ -418,8 +423,59 @@ class MQTT:
         if password is not None:
             self._password = password
 
-    # pylint: disable=too-many-branches, too-many-statements, too-many-locals
     def connect(self, clean_session=True, host=None, port=None, keep_alive=None):
+        """Initiates connection with the MQTT Broker. Will perform exponential back-off
+        on connect failures.
+
+        :param bool clean_session: Establishes a persistent session.
+        :param str host: Hostname or IP address of the remote broker.
+        :param int port: Network port of the remote broker.
+        :param int keep_alive: Maximum period allowed for communication, in seconds.
+
+        """
+
+        ret = None
+        last_exception = None
+        for i in range(0, self._reconnect_attempt_max):
+            # If the last call to self._connect() returned None,
+            # this means no back-off should be done.
+            if ret and i > 0:
+                try:
+                    self._recompute_reconnect()  # Will raise MMQTTException on max attempts.
+                except MMQTTException:
+                    break
+            if self.logger is not None:
+                self.logger.debug(
+                    f"Attempting to connect to MQTT broker (attempt #{self._reconnect_attempt}"
+                )
+
+            try:
+                ret = self._connect(
+                    clean_session=clean_session,
+                    host=host,
+                    port=port,
+                    keep_alive=keep_alive,
+                )
+            except OSError as e:
+                last_exception = e
+                if self.logger is not None:
+                    self.logger.info(f"failed to connect: {e}")
+            except MMQTTException as e:
+                last_exception = e
+                if self.logger is not None:
+                    self.logger.info(f"MMQT error: {e}")
+
+        # TODO: are these indeed repeated ?
+        if not ret:
+            if last_exception:
+                raise MMQTTException("Repeated connect failures") from last_exception
+
+            raise MMQTTException("Repeated connect failures")
+
+        return ret
+
+    # pylint: disable=too-many-branches, too-many-statements, too-many-locals
+    def _connect(self, clean_session=True, host=None, port=None, keep_alive=None):
         """Initiates connection with the MQTT Broker.
 
         :param bool clean_session: Establishes a persistent session.
@@ -438,10 +494,18 @@ class MQTT:
         if self.logger is not None:
             self.logger.debug("Attempting to establish MQTT connection...")
 
+        if self._reconnect_attempt > 0:
+            self.logger.debug(
+                f"Sleeping for {self._reconnect_timeout:.3} seconds due to connect back-off"
+            )
+            time.sleep(self._reconnect_timeout)
+
         # Get a new socket
         self._sock = self._get_connect_socket(
             self.broker, self.port, timeout=self._socket_timeout
         )
+        if self._sock is None:
+            return None
 
         # Fixed Header
         fixed_header = bytearray([0x10])
@@ -521,6 +585,8 @@ class MQTT:
                 result = rc[0] & 1
                 if self.on_connect is not None:
                     self.on_connect(self, self._user_data, result, rc[2])
+                self._reconnect_attempt = 0
+                self._reconnect_time = None
                 return result
 
             if op is None:
@@ -782,15 +848,58 @@ class MQTT:
                         f"No data received from broker for {self._recv_timeout} seconds."
                     )
 
+    def _recompute_reconnect(self):
+        """
+        Recompute the reconnection timeout. The self._reconnect_timeout will be used
+        in self._connect() to perform the actual sleep. Also, the monotonic time
+        of last reconnect will be stored in self._reconnect_time.
+
+        Raise MMQTTException on maximum number of reconnect attempts reached.
+
+        """
+        self._reconnect_attempt = self._reconnect_attempt + 1
+        if self._reconnect_attempt > self._reconnect_attempt_max:
+            raise MMQTTException(
+                f"Maximum number of reconnect attempts ({self._reconnect_attempt_max}) reached"
+            )
+
+        self._reconnect_timeout = self._reconnect_attempt**2 + randint(0, 1000) / 1000
+        time_diff = time.monotonic() - self._reconnect_time
+        if self._reconnect_time and time_diff > 0:
+            if self.logger is not None:
+                self.logger.debug(f"Reducing reconnect timeout by {time_diff} seconds")
+            self._reconnect_timeout = self._reconnect_timeout - time_diff
+
+        if self._reconnect_timeout > self._reconnect_maximum_backoff:
+            if self.logger is not None:
+                self.logger.debug(
+                    f"Truncating reconnect timeout to {self._reconnect_maximum_backoff:.3} seconds"
+                )
+            self._reconnect_timeout = self._reconnect_maximum_backoff
+
+        self._reconnect_time = time.monotonic()
+
     def reconnect(self, resub_topics=True):
         """Attempts to reconnect to the MQTT broker.
+        Return the value from connect() if successful.
+        TODO: describe behavior if already connected
 
         :param bool resub_topics: Resubscribe to previously subscribed topics.
 
         """
+
+        # TODO: disconnect() if connected ?
+
+        # TODO: subtract the time spent between the calls ? (or use for debugging)
+        self._recompute_reconnect()
         if self.logger is not None:
-            self.logger.debug("Attempting to reconnect with MQTT broker")
-        self.connect()
+            self.logger.debug(
+                f"Attempting to reconnect with MQTT broker (attempt #{self._reconnect_attempt}"
+            )
+        ret = self._connect()  # Will raise MMQTTException on failure.
+        if ret is None:
+            # TODO
+            return None
         if self.logger is not None:
             self.logger.debug("Reconnected with broker")
         if resub_topics:
@@ -803,6 +912,8 @@ class MQTT:
             while subscribed_topics:
                 feed = subscribed_topics.pop()
                 self.subscribe(feed)
+
+        return ret
 
     def loop(self, timeout=0):
         # pylint: disable = too-many-return-statements
