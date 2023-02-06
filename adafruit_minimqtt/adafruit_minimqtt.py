@@ -890,9 +890,12 @@ class MQTT:
             time_diff = time.monotonic() - self._reconnect_time
             if self._reconnect_timeout - time_diff > 0:
                 if self.logger is not None:
+                    # pylint: disable=consider-using-f-string
                     self.logger.debug(
-                        f"Reducing reconnect timeout {self._reconnect_timeout:.2f} "
-                        f"by {time_diff:.2f} seconds"
+                        "Reducing reconnect timeout {:.2f} ".format(
+                            self._reconnect_timeout
+                        )
+                        + "by {:.2f} seconds".format(time_diff)
                     )
                 self._reconnect_timeout = self._reconnect_timeout - time_diff
             else:
@@ -910,15 +913,22 @@ class MQTT:
         # Even truncated timeout should have jitter added to it. This is why it is added here.
         jitter = randint(0, 1000) / 1000
         if self.logger is not None:
+            # pylint: disable=consider-using-f-string
             self.logger.debug(
-                f"adding jitter {jitter:.2f} to {self._reconnect_timeout:.2f} seconds"
+                "adding jitter {:.2f} to {:.2f} seconds".format(
+                    jitter, self._reconnect_timeout
+                )
             )
         self._reconnect_timeout += jitter
 
         # Assumes a call to _connect() will follow shortly.
+        # TODO: move this before _connect() calls ?
         self._reconnect_time = time.monotonic()
         if self.logger is not None:
-            self.logger.debug(f"Last reconnect time: {self._reconnect_time:.2f}")
+            # pylint: disable=consider-using-f-string
+            self.logger.debug(
+                "Last reconnect time: {:.2f}".format(self._reconnect_time)
+            )
 
     def _reset_reconnect_backoff(self):
         """
