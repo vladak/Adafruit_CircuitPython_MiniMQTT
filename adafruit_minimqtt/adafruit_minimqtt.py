@@ -197,6 +197,8 @@ class MQTT:
         self._reconnect_attempt = 0
         self._reconnect_time = None
         self._reconnect_maximum_backoff = 32
+        if connect_retries <= 0:
+            raise MMQTTException("connect_retries must be positive")
         self._reconnect_attempts_max = connect_retries
 
         self.broker = broker
