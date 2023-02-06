@@ -145,7 +145,8 @@ class MQTT:
     :param bool use_binary_mode: Messages are passed as bytearray instead of string to callbacks.
     :param int socket_timeout: How often to check socket state for read/write/connect operations,
         in seconds.
-    :param int connect_retries: How many times to try to connect to broker before giving up.
+    :param int connect_retries: How many times to try to connect to the broker before giving up
+        on initial connect or before resetting to the initial state on reconnect.
         Exponential backoff will be used for the retries.
     :param class user_data: arbitrary data to pass as a second argument to the callbacks.
 
