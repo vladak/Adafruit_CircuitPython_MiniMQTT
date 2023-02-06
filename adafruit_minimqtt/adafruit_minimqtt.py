@@ -197,7 +197,7 @@ class MQTT:
         self._reconnect_attempt = 0
         self._reconnect_time = None
         self._reconnect_maximum_backoff = 32
-        self._reconnect_attempt_max = connect_retries
+        self._reconnect_attempts_max = connect_retries
 
         self.broker = broker
         self._username = username
@@ -445,7 +445,7 @@ class MQTT:
         ret = None
         last_exception = None
         backoff = False
-        for i in range(0, self._reconnect_attempt_max):
+        for i in range(0, self._reconnect_attempts_max):
             # If the last call to self._connect() returned None,
             # this means no back-off should be done.
             if i > 0:
@@ -874,10 +874,10 @@ class MQTT:
 
         """
         self._reconnect_attempt = self._reconnect_attempt + 1
-        if self._reconnect_attempt > self._reconnect_attempt_max:
+        if self._reconnect_attempt > self._reconnect_attempts_max:
             # This is used only in reconnect(), unlike connect().
             raise MMQTTMaxReconnectException(
-                f"Maximum number of reconnect attempts ({self._reconnect_attempt_max}) reached"
+                f"Maximum number of reconnect attempts ({self._reconnect_attempts_max}) reached"
             )
 
         self._reconnect_timeout = 2**self._reconnect_attempt
