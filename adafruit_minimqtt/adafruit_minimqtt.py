@@ -446,7 +446,7 @@ class MQTT:
         last_exception = None
         backoff = False
         for i in range(0, self._reconnect_attempts_max):
-            # If the last call to self._connect() returned None,
+            # TODO If the last call to self._connect() returned None,
             # this means no back-off should be done.
             if i > 0:
                 if backoff:
@@ -870,29 +870,33 @@ class MQTT:
         in self._connect() to perform the actual sleep. Also, the monotonic time
         of last reconnect will be stored in self._reconnect_time.
 
-        Raise MMQTTException on maximum number of reconnect attempts reached.
+        Raise MMQTTMaxReconnectException on maximum number of reconnect attempts reached.
 
         """
         self._reconnect_attempt = self._reconnect_attempt + 1
         if self._reconnect_attempt > self._reconnect_attempts_max:
-            # This is used only in reconnect(), unlike connect().
+            # This is handled only in reconnect(), unlike connect().
             raise MMQTTMaxReconnectException(
                 f"Maximum number of reconnect attempts ({self._reconnect_attempts_max}) reached"
             )
 
         self._reconnect_timeout = 2**self._reconnect_attempt
 
-        # TODO
-        """
-        if self._reconnect_time:
-            if self.logger is not None:
-                self.logger.debug("Computing time difference")
+        # Readjust the reconnect timeout based on time elapsed between the calls.
+        # This is more important for the reconnect case.
+        if self._reconnect_time is not None:
             time_diff = time.monotonic() - self._reconnect_time
-            if self._reconnect_time and time_diff > 0:
+            if self._reconnect_timeout - time_diff > 0:
                 if self.logger is not None:
-                    self.logger.debug(f"Reducing reconnect timeout by {time_diff} seconds")
+                    self.logger.debug(
+                        f"Reducing reconnect timeout {self._reconnect_timeout:.2f} "
+                        f"by {time_diff:.2f} seconds"
+                    )
                 self._reconnect_timeout = self._reconnect_timeout - time_diff
-        """
+            else:
+                if self.logger is not None:
+                    self.logger.debug("Reducing reconnect timeout to 0 seconds")
+                self._reconnect_timeout = 0
 
         if self._reconnect_timeout > self._reconnect_maximum_backoff:
             if self.logger is not None:
@@ -904,10 +908,15 @@ class MQTT:
         # Even truncated timeout should have jitter added to it. This is why it is added here.
         jitter = randint(0, 1000) / 1000
         if self.logger is not None:
-            self.logger.debug(f"adding jitter {jitter} to {self._reconnect_timeout}")
+            self.logger.debug(
+                f"adding jitter {jitter:.2f} to {self._reconnect_timeout:.2f} seconds"
+            )
         self._reconnect_timeout += jitter
 
+        # Assumes a call to _connect() will follow shortly.
         self._reconnect_time = time.monotonic()
+        if self.logger is not None:
+            self.logger.debug(f"Last reconnect time: {self._reconnect_time:.2f}")
 
     def _reset_reconnect_backoff(self):
         """
