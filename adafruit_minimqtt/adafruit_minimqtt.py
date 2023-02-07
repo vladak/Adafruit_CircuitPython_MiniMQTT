@@ -444,7 +444,6 @@ class MQTT:
 
         """
 
-        ret = None
         last_exception = None
         backoff = False
         for i in range(0, self._reconnect_attempts_max):
@@ -465,9 +464,8 @@ class MQTT:
                     port=port,
                     keep_alive=keep_alive,
                 )
-                self._reconnect_attempt = 0
-                self._reconnect_time = None
-                break
+                self._reset_reconnect_backoff()
+                return ret
             except TemporaryError as e:
                 if self.logger is not None:
                     self.logger.warning(f"temporary error when connecting: {e}")
@@ -483,15 +481,14 @@ class MQTT:
                     self.logger.info(f"MMQT error: {e}")
                 backoff = True
 
-        # TODO: are these indeed repeated ?
-        if ret is None:
-            if last_exception:
-                raise MMQTTException("Repeated connect failures") from last_exception
+        if self._reconnect_attempts_max > 1:
+            exc_msg = "Repeated connect failures"
+        else:
+            exc_msg = "Connect failure"
+        if last_exception:
+            raise MMQTTException(exc_msg) from last_exception
 
-            raise MMQTTException("Repeated connect failures")
-
-        self._reset_reconnect_backoff()
-        return ret
+        raise MMQTTException(exc_msg)
 
     # pylint: disable=too-many-branches, too-many-statements, too-many-locals
     def _connect(self, clean_session=True, host=None, port=None, keep_alive=None):
@@ -941,6 +938,7 @@ class MQTT:
         if self.logger is not None:
             self.logger.debug("Resetting reconnect backoff")
         self._reconnect_attempt = 0
+        self._reconnect_time = None
 
     def reconnect(self, resub_topics=True):
         """Attempts to reconnect to the MQTT broker.
