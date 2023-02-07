@@ -573,7 +573,7 @@ class MQTT:
             fixed_header.append(0x00)
 
         if self.logger is not None:
-            self.logger.debug("Sending CONNECT to broker...")
+            self.logger.debug("Sending CONNECT packet to broker...")
             self.logger.debug(
                 "Fixed Header: %s\nVariable Header: %s", fixed_header, var_header
             )
