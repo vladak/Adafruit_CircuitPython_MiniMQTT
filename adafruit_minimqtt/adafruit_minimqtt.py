@@ -77,10 +77,6 @@ class MMQTTException(Exception):
     # pass
 
 
-class MMQTTMaxReconnectException(MMQTTException):
-    """Maximum reconnect attempts reached."""
-
-
 class TemporaryError(Exception):
     """Temporary error class used for handling reconnects."""
 
@@ -863,18 +859,10 @@ class MQTT:
     def _recompute_reconnect_backoff(self):
         """
         Recompute the reconnection timeout. The self._reconnect_timeout will be used
-        in self._connect() to perform the actual sleep. Also, the monotonic time
-        of last reconnect will be stored in self._reconnect_time.
-
-        Raise MMQTTMaxReconnectException on maximum number of reconnect attempts reached.
+        in self._connect() to perform the actual sleep.
 
         """
         self._reconnect_attempt = self._reconnect_attempt + 1
-        if self._reconnect_attempt > self._reconnect_attempts_max:
-            raise MMQTTMaxReconnectException(
-                f"Maximum number of reconnect attempts ({self._reconnect_attempts_max}) reached"
-            )
-
         self._reconnect_timeout = 2**self._reconnect_attempt
         if self.logger is not None:
             # pylint: disable=consider-using-f-string
@@ -889,6 +877,7 @@ class MQTT:
                 )
             self._reconnect_timeout = float(self._reconnect_maximum_backoff)
 
+        # Add a sub-second jitter.
         # Even truncated timeout should have jitter added to it. This is why it is added here.
         jitter = randint(0, 1000) / 1000
         if self.logger is not None:
