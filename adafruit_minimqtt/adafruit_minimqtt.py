@@ -192,8 +192,8 @@ class MQTT:
         self._timestamp = 0
         self.logger = None
 
-        self._reconnect_timeout = float(0)
         self._reconnect_attempt = 0
+        self._reconnect_timeout = float(0)
         self._reconnect_maximum_backoff = 32
         if connect_retries <= 0:
             raise MMQTTException("connect_retries must be positive")
@@ -871,7 +871,6 @@ class MQTT:
         """
         self._reconnect_attempt = self._reconnect_attempt + 1
         if self._reconnect_attempt > self._reconnect_attempts_max:
-            # This is handled only in reconnect(), unlike connect().
             raise MMQTTMaxReconnectException(
                 f"Maximum number of reconnect attempts ({self._reconnect_attempts_max}) reached"
             )
@@ -909,6 +908,7 @@ class MQTT:
         if self.logger is not None:
             self.logger.debug("Resetting reconnect backoff")
         self._reconnect_attempt = 0
+        self._reconnect_timeout = float(0)
 
     def reconnect(self, resub_topics=True):
         """Attempts to reconnect to the MQTT broker.
