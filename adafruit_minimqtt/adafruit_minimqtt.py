@@ -285,7 +285,7 @@ class MQTT:
             # Do not consider this for back-off.
             if self.logger is not None:
                 self.logger.warning(
-                    f"Failed to created socket for host {addr_info[0]} and port {addr_info[1]}"
+                    f"Failed to create socket for host {addr_info[0]} and port {addr_info[1]}"
                 )
             raise TemporaryError from exc
 
