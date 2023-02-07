@@ -146,8 +146,7 @@ class MQTT:
     :param int socket_timeout: How often to check socket state for read/write/connect operations,
         in seconds.
     :param int connect_retries: How many times to try to connect to the broker before giving up
-        on initial connect or before resetting to the initial state on reconnect.
-        Exponential backoff will be used for the retries.
+        on connect or reconnect. Exponential backoff will be used for the retries.
     :param class user_data: arbitrary data to pass as a second argument to the callbacks.
 
     """
@@ -195,7 +194,6 @@ class MQTT:
 
         self._reconnect_timeout = float(0)
         self._reconnect_attempt = 0
-        self._reconnect_time = None
         self._reconnect_maximum_backoff = 32
         if connect_retries <= 0:
             raise MMQTTException("connect_retries must be positive")
@@ -440,7 +438,8 @@ class MQTT:
         :param bool clean_session: Establishes a persistent session.
         :param str host: Hostname or IP address of the remote broker.
         :param int port: Network port of the remote broker.
-        :param int keep_alive: Maximum period allowed for communication (single attempt), in seconds.
+        :param int keep_alive: Maximum period allowed for communication
+            within single connection attempt, in seconds.
 
         """
 
@@ -884,25 +883,6 @@ class MQTT:
                 "Reconnect timeout computed to {:.2f}".format(self._reconnect_timeout)
             )
 
-        # Readjust the reconnect timeout based on time elapsed between the calls.
-        # This is more important for the reconnect case.
-        if self._reconnect_time is not None:
-            time_diff = time.monotonic() - self._reconnect_time
-            if self._reconnect_timeout - time_diff > 0:
-                if self.logger is not None:
-                    # pylint: disable=consider-using-f-string
-                    self.logger.debug(
-                        "Reducing reconnect timeout {:.2f} ".format(
-                            self._reconnect_timeout
-                        )
-                        + "by {:.2f} seconds".format(time_diff)
-                    )
-                self._reconnect_timeout = self._reconnect_timeout - time_diff
-            else:
-                if self.logger is not None:
-                    self.logger.debug("Reducing reconnect timeout to 0 seconds")
-                self._reconnect_timeout = 0
-
         if self._reconnect_timeout > self._reconnect_maximum_backoff:
             if self.logger is not None:
                 self.logger.debug(
@@ -921,15 +901,6 @@ class MQTT:
             )
         self._reconnect_timeout += jitter
 
-        # Assumes a call to _connect() will follow shortly.
-        # TODO: move this before _connect() calls ?
-        self._reconnect_time = time.monotonic()
-        if self.logger is not None:
-            # pylint: disable=consider-using-f-string
-            self.logger.debug(
-                "Last reconnect time: {:.2f}".format(self._reconnect_time)
-            )
-
     def _reset_reconnect_backoff(self):
         """
         Reset reconnect back-off to the initial state.
@@ -938,35 +909,20 @@ class MQTT:
         if self.logger is not None:
             self.logger.debug("Resetting reconnect backoff")
         self._reconnect_attempt = 0
-        self._reconnect_time = None
 
     def reconnect(self, resub_topics=True):
         """Attempts to reconnect to the MQTT broker.
-        Return the value like connect() if successful. Will disconnect first if already connected.
-        Exponential backoff is in effect regardless of the reconnect result to avoid hammering
-        the MQTT broker if called in a cycle.
-
-        Once the maximum number of reconnect attempts it reached, the backoff is reset.
+        Return the value from connect() if successful. Will disconnect first if already connected.
+        Will perform exponential back-off on connect failures.
 
         :param bool resub_topics: Whether to resubscribe to previously subscribed topics.
 
         """
 
-        try:
-            self._recompute_reconnect_backoff()
-        except MMQTTMaxReconnectException:
-            self.logger.debug("Reached maximum number of reconnect attempts, resetting")
-            self._reset_reconnect_backoff()
-
         if self.logger is not None:
-            self.logger.debug(
-                f"Attempting to reconnect with MQTT broker (attempt #{self._reconnect_attempt})"
-            )
-        try:
-            ret = self._connect()
-        except TemporaryError as exc:
-            self._reset_reconnect_backoff()
-            raise MMQTTException from exc
+            self.logger.debug("Attempting to reconnect with MQTT broker")
+
+        ret = self.connect()
         if self.logger is not None:
             self.logger.debug("Reconnected with broker")
         if resub_topics:
