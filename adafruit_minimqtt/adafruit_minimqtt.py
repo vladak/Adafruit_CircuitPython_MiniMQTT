@@ -440,7 +440,7 @@ class MQTT:
         :param bool clean_session: Establishes a persistent session.
         :param str host: Hostname or IP address of the remote broker.
         :param int port: Network port of the remote broker.
-        :param int keep_alive: Maximum period allowed for communication, in seconds.
+        :param int keep_alive: Maximum period allowed for communication (single attempt), in seconds.
 
         """
 
