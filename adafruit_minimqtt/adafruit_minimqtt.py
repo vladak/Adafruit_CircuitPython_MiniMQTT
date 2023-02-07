@@ -883,6 +883,11 @@ class MQTT:
             )
 
         self._reconnect_timeout = 2**self._reconnect_attempt
+        if self.logger is not None:
+            # pylint: disable=consider-using-f-string
+            self.logger.debug(
+                "Reconnect timeout computed to {:.2f}".format(self._reconnect_timeout)
+            )
 
         # Readjust the reconnect timeout based on time elapsed between the calls.
         # This is more important for the reconnect case.
