@@ -448,8 +448,6 @@ class MQTT:
         last_exception = None
         backoff = False
         for i in range(0, self._reconnect_attempts_max):
-            # TODO If the last call to self._connect() returned None,
-            # this means no back-off should be done.
             if i > 0:
                 if backoff:
                     self._recompute_reconnect_backoff()
