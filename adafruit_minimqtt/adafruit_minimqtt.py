@@ -782,6 +782,7 @@ class MQTT:
             self.logger.debug("SUBSCRIBING to topic %s with QoS %d", t, q)
         self._sock.send(packet)
         stamp = time.monotonic()
+        self.logger.debug("Receiving SUBACK packet from broker")
         while True:
             op = self._wait_for_msg()
             if op == 0x90:
