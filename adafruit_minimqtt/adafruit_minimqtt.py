@@ -983,7 +983,9 @@ class MQTT:
         self._sock.settimeout(timeout)
         if res in [None, b"", b"\x00"]:
             # If we get here, it means that there is nothing to be received
+            self.logger.debug(f"MSG: Got null/zero message")
             return None
+        self.logger.debug(f"MSG: _wait_for_msg: res[0] = {hex(res[0])}")
         if res[0] & MQTT_PKT_TYPE_MASK == MQTT_PINGRESP:
             self.logger.debug("Got PINGRESP")
             sz = self._sock_exact_recv(1)[0]
@@ -996,9 +998,11 @@ class MQTT:
 
         # Handle only the PUBLISH packet type from now on.
         sz = self._recv_len()
+        self.logger.debug(f"MSG: _wait_for_msg: sz = {sz}")
         # topic length MSB & LSB
         topic_len = self._sock_exact_recv(2)
         topic_len = (topic_len[0] << 8) | topic_len[1]
+        self.logger.debug(f"MSG: _wait_for_msg: topic_len = {topic_len}")
 
         if topic_len > sz - 2:
             raise MMQTTException(
@@ -1063,12 +1067,14 @@ class MQTT:
         :param int bufsize: number of bytes to receive
         :return: byte array
         """
+        self.logger.debug(f"PKT: _sock_exact_recv: bufsize = {bufsize}")
         stamp = time.monotonic()
         if not self._backwards_compatible_sock:
             # CPython/Socketpool Impl.
             rc = bytearray(bufsize)
             mv = memoryview(rc)
             recv_len = self._sock.recv_into(rc, bufsize)
+            self.logger.debug(f"PKT: _sock_exact_recv: recv_len = {recv_len}")
             to_read = bufsize - recv_len
             if to_read < 0:
                 raise MMQTTException(f"negative number of bytes to read: {to_read}")
