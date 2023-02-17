@@ -1075,6 +1075,7 @@ class MQTT:
             mv = memoryview(rc)
             recv_len = self._sock.recv_into(rc, bufsize)
             self.logger.debug(f"PKT: _sock_exact_recv: recv_len = {recv_len}")
+            self.logger.debug(f"PKT: _sock_exact_recv: rc = {rc}")
             to_read = bufsize - recv_len
             if to_read < 0:
                 raise MMQTTException(f"negative number of bytes to read: {to_read}")
